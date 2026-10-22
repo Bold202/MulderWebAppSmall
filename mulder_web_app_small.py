@@ -120,7 +120,8 @@ nx.draw_networkx_edges(G, pos, ax=ax, node_size=node_sizes, edge_color=edge_colo
 fig.patch.set_facecolor('#ffffff')
 ax.axis('off')
     
-st.pyplot(fig)
+# HIER IST DER FIX: use_container_width=False blockiert die Quetschung durch Streamlit
+st.pyplot(fig, use_container_width=False)
 
 st.markdown("---")
 st.markdown("### 📊 Legende zur Diagnose")
