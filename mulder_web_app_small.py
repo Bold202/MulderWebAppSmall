@@ -104,16 +104,12 @@ for node in G.nodes():
     demand = get_demand(node, bluetetag)
     saturation = np.clip((env_factor * supply) / demand, 0.1, 2.0)
     
-    # 25% kleinere Basisgrößen
     node_sizes.append(1500 + (saturation * 3000))
     
-    # NEU: Überschuss-Warnung! Perfekt ist nur 0.85 bis 1.15
-    if 0.85 <= saturation <= 1.15: 
-        node_colors.append('#388e3c') # Perfekt (Grün)
-    elif 0.55 <= saturation < 0.85 or 1.15 < saturation <= 1.4: 
-        node_colors.append('#fbc02d') # Gelb (Leichter Mangel oder beginnender Überschuss)
-    else: 
-        node_colors.append('#d32f2f') # Rot (Akuter Mangel ODER toxischer Überschuss)
+    # NEU: Stufenloser Farbverlauf (RdYlGn). 1.0 ist perfektes Grün, Abweichungen (Mangel/Überschuss) faden über Gelb zu Rot.
+    # Ein Distanz-Faktor wandelt die Sättigung in einen Wert zwischen 0.0 (Rot) und 1.0 (Grün) um.
+    color_val = np.clip(1.0 - (abs(saturation - 1.0) * 1.5), 0.0, 1.0)
+    node_colors.append(color_val)
 
 ph_stress = get_ph_zone_stress(ph_value)
 
@@ -127,7 +123,6 @@ for u, v, data in G.edges(data=True):
     
     if data['type'] in ['antagonism_strong', 'antagonism_weak']:
         arrow_strength = np.clip(ion_mass * ph_stress * (supply ** 0.5), 0.1, 1.0)
-        # NEU: Halbierte Basis-Dicke (1.0 statt 2.0)
         edge_widths.append(1.0 + (arrow_strength * 6.0))
         
         if data['type'] == 'antagonism_strong':
@@ -140,19 +135,19 @@ for u, v, data in G.edges(data=True):
             else: edge_colors.append('#cfcfcf') 
             
     elif data['type'] == 'synergism':
-        # NEU: Synergismus ist im Standard blass. Explodiert nur bei massivem Überschuss.
         arrow_strength = np.clip((ion_mass - 0.7) * 0.8, 0.1, 1.0)
         edge_widths.append(1.0 + (arrow_strength * 5.0))
         
         if arrow_strength >= 0.70: edge_colors.append('#1b5e20') 
         elif arrow_strength >= 0.30: edge_colors.append('#4caf50') 
-        else: edge_colors.append('#e8f5e9') # Unauffällig blassgrün
+        else: edge_colors.append('#e8f5e9')
 
 st.title("Dynamisches Nährstoff-Diagnosetool")
 
 fig, ax = plt.subplots(figsize=(12, 12))
 
-nx.draw_networkx_nodes(G, pos, ax=ax, node_size=node_sizes, node_color=node_colors, edgecolors='#222222', linewidths=2)
+# NEU: cmap=plt.cm.RdYlGn aktiviert die weiche Farbpalette für die Knoten
+nx.draw_networkx_nodes(G, pos, ax=ax, node_size=node_sizes, node_color=node_colors, cmap=plt.cm.RdYlGn, vmin=0.0, vmax=1.0, edgecolors='#222222', linewidths=2)
 nx.draw_networkx_labels(G, pos, ax=ax, font_size=13, font_weight='bold')
 nx.draw_networkx_edges(G, pos, ax=ax, node_size=node_sizes, edge_color=edge_colors, width=edge_widths, arrowsize=25, connectionstyle='arc3,rad=0.15', arrows=True)
 
@@ -167,9 +162,9 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("#### Knoten (Pflanzen-Sättigung vs. Bedarf)")
-    st.markdown("🟢 **Grüner Knoten:** Perfekte Balance (85 % – 115 % Deckung).")
-    st.markdown("🟡 **Gelber Knoten:** Warnbereich! Leichter Mangel oder beginnender Überschuss.")
-    st.markdown("🔴 **Roter Knoten:** Alarm! Akuter Mangel ODER toxischer Überschuss (das Element flutet die Pflanze).")
+    st.markdown("🟢 **Tiefgrüner Knoten:** Perfekte Balance (ca. 100 % Bedarfsdeckung).")
+    st.markdown("🟡 **Gelblicher Knoten:** Beginnender Stress. Leichter Mangel oder beginnender Überschuss durch Umweltfaktoren oder hohen Phasenbedarf.")
+    st.markdown("🔴 **Roter Knoten:** Alarm! Akuter Mangel ODER toxischer Überschuss (das Element flutet die Pflanze unkontrolliert).")
 
 with col2:
     st.markdown("#### Pfeile (Wurzelraum-Dynamik)")
