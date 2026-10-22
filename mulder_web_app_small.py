@@ -5,54 +5,97 @@ import numpy as np
 
 st.set_page_config(page_title="Mulder Diagnose Tool", layout="wide")
 
-st.info("📱 **Setup-Menü:** Tippe oben links auf den Pfeil ( **>** ), um pH-Wert, Blütetag und Nährstoffe einzustellen.")
+st.info("📱 **Setup-Menü:** Tippe oben links auf den Pfeil ( **>** ), um pH-Wert, Blütetag und Verhältnisse einzustellen.")
 
 def get_availability(nutrient, ph, temp, light):
-    if nutrient in ['N', 'K', 'S']: base = np.clip((ph - 4.5) / 1.5, 0.1, 1.0)
-    elif nutrient == 'P': base = np.clip(1.0 - abs(6.5 - ph) * 0.7, 0.1, 1.0)
-    elif nutrient in ['Ca', 'Mg']: base = np.clip((ph - 5.0) / 1.5, 0.1, 1.0)
-    elif nutrient == 'Fe': base = np.clip(1.0 - (ph - 5.5) / 2.0, 0.1, 1.0)
-    elif nutrient in ['Mn', 'Zn', 'Cu', 'B']: base = np.clip(1.0 - (ph - 6.0) / 2.5, 0.1, 1.0)
-    elif nutrient == 'Mo': base = np.clip((ph - 5.5) / 1.5, 0.1, 1.0)
-    elif nutrient == 'Na': base = 0.8
-    else: base = 0.5
+    # 1. pH-Basisverfügbarkeit (beidseitig kalibriert nach den pH-Referenztafeln)
+    if nutrient == 'N': 
+        # Ideal 6.0 - 7.5, Abfall im stark sauren (<5.5) und alkalischen (>8.0) Bereich
+        base = np.clip(1.0 - max(0.0, 5.8 - ph) * 0.5 - max(0.0, ph - 7.5) * 0.5, 0.1, 1.0)
+    elif nutrient in ['K', 'S']: 
+        # Ab pH 6.0 voll verfügbar, knickt nur unter 5.5 ein
+        base = np.clip((ph - 4.5) / 1.5, 0.1, 1.0)
+    elif nutrient == 'P': 
+        # Enges Optimum zwischen 6.2 und 7.2, starker Lockout darunter und darüber
+        base = np.clip(1.0 - abs(6.7 - ph) * 0.65, 0.1, 1.0)
+    elif nutrient == 'Ca': 
+        # Optimum 6.0 - 7.8, fällt unter 6.0 und über 8.0 stark ab
+        base = np.clip(1.0 - max(0.0, 6.0 - ph) * 0.6 - max(0.0, ph - 7.6) * 0.6, 0.1, 1.0)
+    elif nutrient == 'Mg': 
+        # Optimum 6.0 - 8.2, fällt unter 6.0 und über 8.2 ab
+        base = np.clip(1.0 - max(0.0, 5.8 - ph) * 0.6 - max(0.0, ph - 8.0) * 0.6, 0.1, 1.0)
+    elif nutrient == 'Fe': 
+        # Hochverfügbar im Sauren, fällt ab pH 6.0 steil ab
+        base = np.clip(1.0 - max(0.0, ph - 5.5) * 0.45, 0.1, 1.0)
+    elif nutrient in ['Mn', 'Zn', 'Cu', 'B']: 
+        # Optimum 5.2 - 6.8, knickt bei extremem Säuregrad (<5.0) und ab 7.0 ein
+        base = np.clip(1.0 - max(0.0, 5.2 - ph) * 0.5 - max(0.0, ph - 6.6) * 0.45, 0.1, 1.0)
+    elif nutrient == 'Mo': 
+        # Verfügbarkeit steigt erst ab pH 6.0+ richtig an
+        base = np.clip((ph - 5.0) / 2.0, 0.1, 1.0)
+    elif nutrient == 'Na': 
+        base = 0.8
+    else: 
+        base = 0.5
         
+    # 2. Thermodynamik & Licht (Transpirationssog / Mikrobiologie)
     light_factor = np.clip(light / 100.0, 0.3, 1.2)
     
-    if nutrient == 'P': return np.clip(base * np.clip((temp - 8.0) / 10.0, 0.1, 1.0), 0.1, 1.0)
-    elif nutrient in ['N', 'S']: return np.clip(base * np.clip((temp - 5.0) / 15.0, 0.1, 1.0), 0.1, 1.0)
-    elif nutrient == 'Mg': return np.clip(base * light_factor, 0.1, 1.0)
-    elif nutrient == 'Ca': return np.clip(base * light_factor * np.clip(temp / 25.0, 0.3, 1.0), 0.1, 1.0)
-    else: return np.clip(base * np.clip((temp + 5.0) / 30.0, 0.2, 1.0), 0.1, 1.0)
+    if nutrient == 'P': 
+        # Physikalische Diffusionssperre im kalten Substrat (<14°C)
+        return np.clip(base * np.clip((temp - 8.0) / 10.0, 0.1, 1.0), 0.1, 1.0)
+    elif nutrient in ['N', 'S']: 
+        # Mikrobielle Umsetzung temperaturabhängig
+        return np.clip(base * np.clip((temp - 5.0) / 15.0, 0.1, 1.0), 0.1, 1.0)
+    elif nutrient == 'Mg': 
+        # Direkt gekoppelt an Chlorophyll-Aktivität (Licht)
+        return np.clip(base * light_factor, 0.1, 1.0)
+    elif nutrient == 'Ca': 
+        # Passiver Transport im Xylem-Massenstrom (Licht + Wärme)
+        return np.clip(base * light_factor * np.clip(temp / 24.0, 0.3, 1.0), 0.1, 1.0)
+    else: 
+        return np.clip(base * np.clip((temp + 5.0) / 27.0, 0.2, 1.0), 0.1, 1.0)
 
 def get_demand(nutrient, day):
+    """ Relativer Pflanzenbedarf über die Blütephase (Tag 0 bis 75) """
     if nutrient == 'N': return np.clip(1.2 - (day / 70.0) * 0.8, 0.3, 1.2) 
-    elif nutrient == 'Ca': return 0.8 + np.sin(np.clip(day / 30.0, 0, 1) * np.pi) * 0.6 
-    elif nutrient == 'P': return 0.7 + np.sin(np.clip((day - 10)/50.0, 0, 1) * np.pi) * 0.5 
-    elif nutrient == 'Mg': return 0.8 + np.sin(np.clip((day - 10) / 40.0, 0, 1) * np.pi) * 0.4 
-    elif nutrient == 'K': return 0.8 + np.sin(np.clip((day - 20)/50.0, 0, 1) * np.pi) * 0.6 
+    elif nutrient == 'Ca': return 0.8 + np.sin(np.clip(day / 30.0, 0, 1) * np.pi) * 0.55 # Stretch-Peak (Zellwandbau)
+    elif nutrient == 'P': return 0.7 + np.sin(np.clip((day - 10) / 50.0, 0, 1) * np.pi) * 0.5 # Blütenanlage
+    elif nutrient == 'Mg': return 0.8 + np.sin(np.clip((day - 8) / 42.0, 0, 1) * np.pi) * 0.45 # Mittlere Blüte
+    elif nutrient == 'K': return 0.75 + np.sin(np.clip((day - 18) / 52.0, 0, 1) * np.pi) * 0.6 # Blütenmasse-Peak
     else: return 1.0 
 
 def get_ph_zone_stress(ph):
-    if 6.0 <= ph <= 7.0: return 0.3 + 0.15 * (abs(ph - 6.5) / 0.5) 
-    elif 5.5 <= ph < 6.0: return 0.45 + 0.3 * ((6.0 - ph) / 0.5)
-    elif 7.0 < ph <= 7.5: return 0.45 + 0.3 * ((ph - 7.0) / 0.5)
+    """ Steuert die Aggressivität der Antagonismen außerhalb des pH-Pufferbereichs (6.0 - 7.0) """
+    if 6.0 <= ph <= 7.0: return 0.35 + 0.10 * (abs(ph - 6.5) / 0.5) 
+    elif 5.5 <= ph < 6.0: return 0.45 + 0.30 * ((6.0 - ph) / 0.5)
+    elif 7.0 < ph <= 7.5: return 0.45 + 0.30 * ((ph - 7.0) / 0.5)
     elif ph < 5.5: return 0.75 + 0.25 * (min(5.5 - ph, 1.5) / 1.5)
     else: return 0.75 + 0.25 * (min(ph - 7.5, 2.5) / 2.5)
 
 nutrients = ['N', 'P', 'K', 'Ca', 'Mg', 'S', 'Fe', 'Mn', 'Zn', 'Cu', 'B', 'Mo', 'Na']
-antagonisms_strong = [('Ca','K'), ('Ca','Mg'), ('Ca','P'), ('Ca','Zn'), ('Ca','Fe'), ('Ca','Mn'), 
-                      ('K','Ca'), ('K','Mg'), ('Mg','Ca'), ('Mg','K'), ('P','K'), ('P','Ca'), 
-                      ('P','Zn'), ('P','Cu'), ('N','K'), ('N','B'), ('Zn','Fe'), ('Fe','P'), ('Na','K'), ('Na','Ca'), ('Na','Mg')]
-antagonisms_weak = [('Mn','Fe'), ('Fe','Mn'), ('Fe','Zn'), ('Cu','Zn'), ('Cu','Fe'), ('Cu','Mn')]
-synergies = [('N','Mg'), ('Mg','N'), ('Mg','P'), ('P','Mg'), ('K','Fe'), ('K','Mn'), ('Mn','K')]
+
+# Exakt abgeglichen mit dem Referenz-Wirkungsgefüge
+antagonisms_strong = [
+    ('Ca','K'), ('Ca','Mg'), ('Ca','P'), ('Ca','Zn'), ('Ca','Mn'), ('Ca','B'),
+    ('K','Ca'), ('K','Mg'), ('K','Na'),
+    ('P','Ca'), ('P','Zn'),
+    ('Mn','N')
+]
+antagonisms_weak = [
+    ('Ca','Fe'), ('Mn','Fe'), ('Zn','Fe'), ('Cu','Fe'), ('Cu','Mn'),
+    ('P','Cu'), ('P','K'), ('K','B'), ('N','K'), ('N','B'), ('Fe','P')
+]
+synergies = [
+    ('N','Mg'), ('P','Mg'), ('Mg','P'), ('K','Fe'), ('K','Mn'), ('Mn','S'), ('S','N')
+]
 
 st.sidebar.header("🌱 Wachstumsphase")
 bluetetag = st.sidebar.slider("Blütetag", 0, 75, 15, 1)
 
-st.sidebar.header("💧 Nährstoff-Zufuhr")
-st.sidebar.caption("Das agronomische Idealmaß für Ca:Mg liegt bei ca. 3.0")
-camg_ratio = st.sidebar.slider("Ca:Mg Verhältnis (Gießwasser)", 1.0, 6.0, 3.0, 0.1)
+st.sidebar.header("💧 Verhältnisse (Gießwasser)")
+st.sidebar.caption("Das physiologische Idealverhältnis für Ca:Mg liegt bei ca. 3:1")
+camg_ratio = st.sidebar.slider("Ca:Mg Verhältnis", 1.0, 6.0, 3.0, 0.1)
 
 st.sidebar.header("🌡️ Umwelt-Parameter")
 ph_value = st.sidebar.slider("pH-Level", 4.0, 9.0, 6.5, 0.1)
@@ -68,6 +111,7 @@ G.add_edges_from(synergies, type='synergism')
 pos = nx.circular_layout(G)
 node_sizes, node_colors, edge_colors, edge_widths = [], [], [], []
 
+# 1. KNOTEN: Interne Pflanzen-Bilanz = (Verfügbarkeit * Zufuhr) / Bedarf
 for node in G.nodes():
     env_factor = get_availability(node, ph_value, temp_value, light_value)
     
@@ -80,34 +124,43 @@ for node in G.nodes():
     
     node_sizes.append(2000 + (saturation * 4000))
     if saturation >= 0.8: node_colors.append('#388e3c') 
-    elif saturation >= 0.5: node_colors.append('#fbc02d')
+    elif saturation >= 0.55: node_colors.append('#fbc02d')
     else: node_colors.append('#d32f2f')
 
 ph_stress = get_ph_zone_stress(ph_value)
 
+# 2. PFEILE: Reine Ionen-Konkurrenz im Wurzelraum (unabhängig vom Blütetag-Bedarf)
 for u, v, data in G.edges(data=True):
     env_factor = get_availability(u, ph_value, temp_value, light_value)
     if u == 'Ca': supply = (camg_ratio / 3.0)
     elif u == 'Mg': supply = (3.0 / camg_ratio)
     else: supply = 1.0
-    demand = get_demand(u, bluetetag)
     
-    u_saturation = np.clip((env_factor * supply) / demand, 0.1, 1.5)
-    arrow_strength = np.clip(ph_stress * (u_saturation / 1.5), 0.1, 1.0)
-    edge_widths.append(2.0 + (arrow_strength * 6.0))
+    # Aktive Ionenmasse an der Wurzeloberfläche
+    ion_mass = env_factor * supply
     
-    if data['type'] == 'antagonism_strong':
-        if arrow_strength >= 0.7: edge_colors.append('#d32f2f')
-        elif arrow_strength >= 0.45: edge_colors.append('#fbc02d')
-        else: edge_colors.append('#9e9e9e')
-    elif data['type'] == 'antagonism_weak':
-        if arrow_strength >= 0.7: edge_colors.append('#757575') 
-        elif arrow_strength >= 0.45: edge_colors.append('#9e9e9e')
-        else: edge_colors.append('#cfcfcf') 
+    if data['type'] in ['antagonism_strong', 'antagonism_weak']:
+        # Antagonismus eskaliert bei pH-Stress ODER massiver Überdosierung (supply > 1.0)
+        arrow_strength = np.clip(ion_mass * ph_stress * (supply ** 0.4), 0.1, 1.0)
+        edge_widths.append(2.0 + (arrow_strength * 6.0))
+        
+        if data['type'] == 'antagonism_strong':
+            if arrow_strength >= 0.68: edge_colors.append('#d32f2f')
+            elif arrow_strength >= 0.42: edge_colors.append('#fbc02d')
+            else: edge_colors.append('#9e9e9e')
+        else:
+            if arrow_strength >= 0.68: edge_colors.append('#616161') 
+            elif arrow_strength >= 0.42: edge_colors.append('#9e9e9e')
+            else: edge_colors.append('#cfcfcf') 
+            
     elif data['type'] == 'synergism':
-        if arrow_strength >= 0.7: edge_colors.append('#2e7d32') 
-        elif arrow_strength >= 0.45: edge_colors.append('#4caf50') 
-        else: edge_colors.append('#a5d6a7') 
+        # Synergismus skaliert direkt mit der real verfügbaren Masse des Geber-Elements
+        arrow_strength = np.clip(ion_mass * 0.55, 0.1, 1.0)
+        edge_widths.append(2.0 + (arrow_strength * 6.0))
+        
+        if arrow_strength >= 0.70: edge_colors.append('#1b5e20') # Überförderung (z.B. bei starkem Überschuss)
+        elif arrow_strength >= 0.40: edge_colors.append('#4caf50') # Optimaler Synergismus
+        else: edge_colors.append('#c8e6c9') # Abgeschwächt durch Mangel des Geber-Elements
 
 st.title("Dynamisches Nährstoff-Diagnosetool")
 
@@ -120,7 +173,6 @@ nx.draw_networkx_edges(G, pos, ax=ax, node_size=node_sizes, edge_color=edge_colo
 fig.patch.set_facecolor('#ffffff')
 ax.axis('off')
     
-# HIER IST DER FIX: use_container_width=False blockiert die Quetschung durch Streamlit
 st.pyplot(fig, use_container_width=False)
 
 st.markdown("---")
@@ -128,20 +180,21 @@ st.markdown("### 📊 Legende zur Diagnose")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("#### Knoten (Sättigung vs. Bedarf)")
-    st.markdown("🟢 **Grüner Knoten:** Das Element ist optimal verfügbar und deckt den exakten Bedarf der Pflanze am aktuellen Blütetag.")
-    st.markdown("🟡 **Gelber Knoten:** Warnbereich! Der Bedarf steigt (z.B. Calcium im Stretch) oder die Umwelt blockiert das Element. Das System ist auf Kante genäht.")
-    st.markdown("🔴 **Roter Knoten:** Akuter Mangel! Die Pflanze saugt das Element schneller leer, als es durch das Gießwasser (Ca:Mg Ratio) oder den pH-Wert nachgeliefert wird.")
+    st.markdown("#### Knoten (Pflanzen-Sättigung vs. Bedarf)")
+    st.markdown("🟢 **Grüner Knoten:** Verfügbarkeit und Zufuhr decken den relativen Bedarf der Pflanze am gewählten Blütetag.")
+    st.markdown("🟡 **Gelber Knoten:** Grenzbereich. Entweder steigt der Bedarf stark an (z.B. Ca im Stretch, K in der Hochblüte) oder Umweltfaktoren bremsen die Aufnahme.")
+    st.markdown("🔴 **Roter Knoten:** Relatives Defizit! Die Pflanze verbraucht mehr, als durch pH-Wert, Temperatur oder Ca:Mg-Verhältnis nachgeliefert werden kann.")
 
 with col2:
-    st.markdown("#### Pfeile (Blockaden & Förderung)")
-    st.markdown("🔴 **Roter Pfeil (Toxisch):** Massive Blockade des Zielelements durch gefährliche pH-Werte oder extreme Überdosierung.")
-    st.markdown("🟡 **Gelber Pfeil (Warnbereich):** Beginnende Konkurrenz. Das System gerät unter Stress.")
-    st.markdown("⚪ **Grauer Pfeil (Steuernd):** Natürlicher Antagonismus. Völlig unbedenklich, reguliert das Wachstum sanft.")
-    st.markdown("🟩 **Dicker dunkelgrüner Pfeil:** Starker Synergismus. **Achtung:** Gefahr der Überdosierung des geförderten Elements!")
+    st.markdown("#### Pfeile (Wurzelraum-Dynamik)")
+    st.markdown("🔴 **Roter Pfeil (Toxische Blockade):** Aktive Verdrängung des Zielelements an der Wurzel durch falschen pH-Wert oder extremes Ca:Mg-Ungleichgewicht.")
+    st.markdown("🟡 **Gelber Pfeil (Warnbereich):** Erhöhte Ionenkonkurrenz im Substrat.")
+    st.markdown("⚪ **Grauer Pfeil (Steuernd):** Natürliches Gleichgewicht im pH-Pufferbereich (6,0–7,0).")
+    st.markdown("🟢 **Mittelgrüner Pfeil:** Aktiver Synergismus unterstützt die Aufnahme des Zielelements.")
+    st.markdown("🟩 **Dunkelgrüner Pfeil:** Überförderung durch massiven Überschuss des Geber-Elements.")
 
 st.markdown("---")
 st.markdown("### Über dieses Tool")
-st.markdown("Dieses Diagnosetool vergleicht die thermodynamische Verfügbarkeit (pH, Temp, Licht) und deine Zufuhr (Ca:Mg) mit den dynamischen Nährstoffbedürfnissen der Pflanze im Verlauf der Blütephase.")
+st.markdown("Dieses Diagnosetool stellt die relativen Wechselwirkungen zwischen Umweltparametern (pH, Temperatur, Licht), Ionenkonkurrenz und dem dynamischen Bedarf im Blüteverlauf dar.")
 st.markdown("**Kontakt:** Discord `@BonsaiDaddy`")
-st.caption("⚖️ **Hinweis:** Dies ist ein privates Hobby-Projekt. Das Tool dient Bildungszwecken, simuliert chemische Tendenzen und ersetzt keine Laboranalyse. Keine Haftung für Pflanzenschäden.")
+st.caption("⚖️ **Hinweis:** Privates Hobby-Projekt zu Bildungszwecken. Das Modell bildet ausschließlich relative Tendenzen ab, liefert keine quantitativen Düngeempfehlungen und ersetzt keine Substrat- oder Wasseranalyse.")
