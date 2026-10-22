@@ -140,7 +140,7 @@ nx.draw_networkx_edges(G, pos, ax=ax, node_size=node_sizes, edge_color=edge_colo
 fig.patch.set_facecolor('#ffffff')
 ax.axis('off')
     
-st.pyplot(fig)
+st.pyplot(fig, use_container_width=False)
 
 # --- LEGENDE ---
 st.markdown("---")
